@@ -1,2 +1,3 @@
 availability_log.jsonl
 *.html
+.DS_Store

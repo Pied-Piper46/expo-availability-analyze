@@ -8,6 +8,7 @@ import json
 from datetime import datetime, timedelta
 from collections import defaultdict
 import os
+import argparse
 
 # パビリオン名のマッピング
 PAVILION_NAMES = {
@@ -17,7 +18,7 @@ PAVILION_NAMES = {
     'HGH0': 'ノモの国'
 }
 
-def load_and_process_data(file_path):
+def load_and_process_data(file_path, start_date=None, end_date=None):
     """JSONLファイルを読み込み、データを処理"""
     data = []
     with open(file_path, 'r', encoding='utf-8') as f:
@@ -36,6 +37,12 @@ def load_and_process_data(file_path):
         # UTC時刻をJSTに変換
         utc_time = datetime.fromisoformat(item['timestamp'].replace('Z', '+00:00'))
         jst_time = utc_time + timedelta(hours=9)  # JST = UTC + 9時間
+        
+        # 日時フィルタリング
+        if start_date and jst_time.date() < start_date:
+            continue
+        if end_date and jst_time.date() > end_date:
+            continue
         
         # 分単位で正確な時刻を保持
         exact_time = jst_time.replace(second=0, microsecond=0)
@@ -140,6 +147,7 @@ def generate_pavilion_html(pavilion_code, pavilion_name, patterns):
             
             .header p {{
                 font-size: 1.2em;
+                font-weight: 700;
                 opacity: 0.9;
             }}
             
@@ -200,6 +208,7 @@ def generate_pavilion_html(pavilion_code, pavilion_name, patterns):
                 <h1>{pavilion_name}</h1>
                 <p>空き開放時刻一覧</p>
                 <p>（一度開放されてから10分間は新たな開放時刻として表示していません）</p>
+                <p>（会場オープン時の開放も表示していません）</p>
             </div>
             
             <div class="content">
@@ -251,16 +260,92 @@ def generate_pavilion_html(pavilion_code, pavilion_name, patterns):
     
     return html_content
 
+def parse_arguments():
+    """コマンドライン引数を解析"""
+    parser = argparse.ArgumentParser(
+        description='パビリオン空き状況解放時刻分析ツール',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='''
+使用例:
+  # 全期間を対象に分析
+  python pavilion_analyzer.py
+  
+  # 2024年1月1日から2024年1月31日までを対象に分析
+  python pavilion_analyzer.py --start 2024-01-01 --end 2024-01-31
+  
+  # 2024年1月15日以降を対象に分析
+  python pavilion_analyzer.py --start 2024-01-15
+        '''
+    )
+    
+    parser.add_argument(
+        '--start', '-s',
+        type=str,
+        help='分析開始日（YYYY-MM-DD形式、例: 2024-01-01）'
+    )
+    
+    parser.add_argument(
+        '--end', '-e',
+        type=str,
+        help='分析終了日（YYYY-MM-DD形式、例: 2024-01-31）'
+    )
+    
+    parser.add_argument(
+        '--input', '-i',
+        type=str,
+        default='availability_log.jsonl',
+        help='入力ファイルパス（デフォルト: availability_log.jsonl）'
+    )
+    
+    return parser.parse_args()
+
 def main():
     """メイン処理"""
-    input_file = 'availability_log.jsonl'
+    args = parse_arguments()
+    
+    # 日付パラメータの解析
+    start_date = None
+    end_date = None
+    
+    if args.start:
+        try:
+            start_date = datetime.strptime(args.start, '%Y-%m-%d').date()
+        except ValueError:
+            print(f"エラー: 開始日の形式が正しくありません: {args.start}")
+            print("正しい形式: YYYY-MM-DD (例: 2024-01-01)")
+            return
+    
+    if args.end:
+        try:
+            end_date = datetime.strptime(args.end, '%Y-%m-%d').date()
+        except ValueError:
+            print(f"エラー: 終了日の形式が正しくありません: {args.end}")
+            print("正しい形式: YYYY-MM-DD (例: 2024-01-31)")
+            return
+    
+    # 日付の妥当性チェック
+    if start_date and end_date and start_date > end_date:
+        print("エラー: 開始日が終了日より後になっています。")
+        return
+    
+    input_file = args.input
     
     if not os.path.exists(input_file):
         print(f"エラー: {input_file} が見つかりません。")
         return
     
-    print("📊 データを読み込み中...")
-    data = load_and_process_data(input_file)
+    # 分析期間の表示
+    period_info = "全期間"
+    if start_date or end_date:
+        if start_date and end_date:
+            period_info = f"{start_date.strftime('%Y年%m月%d日')} ～ {end_date.strftime('%Y年%m月%d日')}"
+        elif start_date:
+            period_info = f"{start_date.strftime('%Y年%m月%d日')} 以降"
+        elif end_date:
+            period_info = f"{end_date.strftime('%Y年%m月%d日')} 以前"
+    
+    print(f"📊 データを読み込み中... ({period_info})")
+    data = load_and_process_data(input_file, start_date, end_date)
     
     if not data:
         print("対象パビリオンのデータが見つかりません。")
