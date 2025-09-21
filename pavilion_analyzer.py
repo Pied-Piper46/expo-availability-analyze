@@ -12,10 +12,8 @@ import argparse
 
 # パビリオン名のマッピング
 PAVILION_NAMES = {
-    'C2N0': 'イタリア館（~15:00）',
-    'C2N3': 'イタリア館（15:00~）',
     'HEH0': '住友館',
-    'HGH0': 'ノモの国'
+    'EDF0': 'ヨルダン'
 }
 
 def load_and_process_data(file_path, start_date=None, end_date=None):

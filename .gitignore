@@ -1,3 +1,5 @@
 availability_log.jsonl
 *.html
+*.png
 .DS_Store
+results/
