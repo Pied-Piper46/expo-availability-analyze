@@ -99,12 +99,68 @@ def analyze_daily_release_patterns(data):
     
     return filtered_patterns
 
+def preprocess_releases_for_distribution(data, interval_minutes=15):
+    """15分間隔重複除去による前処理"""
+    target_pavilions = ['C060', 'C063', 'C066', 'HEH0', 'EDF0']
+    raw_releases = defaultdict(list)
+
+    # status=0（解放）のデータのみ収集
+    for item in data:
+        if item['pavilion_code'] in target_pavilions and item['status'] == 0:
+            raw_releases[item['pavilion_code']].append(item)
+
+    # 時系列でソート
+    for pavilion_code in raw_releases:
+        raw_releases[pavilion_code].sort(key=lambda x: x['timestamp'])
+
+    print(f"📊 生データ統計 (status=0のみ):")
+    for code in target_pavilions:
+        count = len(raw_releases[code])
+        print(f"  - {PAVILION_NAMES.get(code, code)}: {count}回（重複除去前）")
+
+    # 15分間隔での重複除去
+    filtered_releases = defaultdict(list)
+    removed_count = defaultdict(int)
+
+    for pavilion_code, releases in raw_releases.items():
+        if not releases:
+            continue
+
+        last_release_time = None
+
+        for release in releases:
+            current_time = release['timestamp']
+
+            # 前回解放から15分経過していれば有効な解放とする
+            if (last_release_time is None or
+                (current_time - last_release_time).total_seconds() >= interval_minutes * 60):
+
+                filtered_releases[pavilion_code].append(release)
+                last_release_time = current_time
+            else:
+                removed_count[pavilion_code] += 1
+
+    print(f"\n🔧 15分間隔重複除去結果:")
+    for code in target_pavilions:
+        original = len(raw_releases[code])
+        filtered = len(filtered_releases[code])
+        removed = removed_count[code]
+        reduction_rate = (removed / original * 100) if original > 0 else 0
+
+        print(f"  - {PAVILION_NAMES.get(code, code)}: {original}回 → {filtered}回")
+        print(f"    除去: {removed}回 ({reduction_rate:.1f}%削減)")
+
+    return filtered_releases
+
 def calculate_release_time_distribution(data):
-    """解放時間の確率分布を計算（15分単位）"""
+    """解放時間の確率分布を計算（15分単位、重複除去済み）"""
     pavilion_distributions = {}
 
+    # 15分間隔重複除去を実行
+    filtered_releases = preprocess_releases_for_distribution(data)
+
     # 対象パビリオンのみ処理
-    target_pavilions = ['C060', 'C063', 'C066']
+    target_pavilions = ['C060', 'C063', 'C066', 'HEH0', 'EDF0']
 
     # 10:00 ~ 20:00の全ての15分間隔を生成
     all_time_slots = []
@@ -129,14 +185,14 @@ def calculate_release_time_distribution(data):
         if pavilion_code not in PAVILION_NAMES:
             continue
 
-        pavilion_data = [item for item in data if item['pavilion_code'] == pavilion_code]
+        pavilion_data = filtered_releases.get(pavilion_code, [])
 
         if not pavilion_data:
             continue
 
         # 15分単位で時間をグループ化
         time_groups = defaultdict(int)
-        total_releases = 0
+        total_releases = len(pavilion_data)
 
         for item in pavilion_data:
             jst_time = item['timestamp']
@@ -148,7 +204,6 @@ def calculate_release_time_distribution(data):
             # 10:00 ~ 20:00の範囲内のみカウント
             if time_group in all_time_slots:
                 time_groups[time_group] += 1
-                total_releases += 1
 
         if total_releases == 0:
             continue
@@ -182,8 +237,8 @@ def create_distribution_visualization(pavilion_distributions):
     # 日本語フォントの設定（元の設定を復元）
     plt.rcParams['font.family'] = ['DejaVu Sans', 'Hiragino Sans', 'Yu Gothic', 'Meiryo', 'Takao', 'IPAexGothic', 'IPAPGothic', 'VL PGothic', 'Noto Sans CJK JP']
 
-    target_pavilions = ['C060', 'C063', 'C066']
-    colors = ['#FF6B6B', '#4ECDC4', '#45B7D1']
+    target_pavilions = ['C060', 'C063', 'C066', 'HEH0', 'EDF0']
+    colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7']
 
     created_files = []
 
@@ -243,10 +298,10 @@ def create_distribution_visualization(pavilion_distributions):
 def generate_distribution_table(pavilion_distributions):
     """確率分布表を生成"""
     print("\n" + "="*80)
-    print("パビリオン解放時間確率分布表（15分単位）")
+    print("パビリオン解放時間確率分布表（15分単位・重複除去版）")
     print("="*80)
 
-    target_pavilions = ['C060', 'C063', 'C066']
+    target_pavilions = ['C060', 'C063', 'C066', 'HEH0', 'EDF0']
 
     for pavilion_code in target_pavilions:
         if pavilion_code not in pavilion_distributions:
@@ -288,7 +343,7 @@ def generate_distribution_table(pavilion_distributions):
 
 def generate_distribution_html(pavilion_distributions):
     """確率分布のHTMLレポートを生成"""
-    target_pavilions = ['C060', 'C063', 'C066']
+    target_pavilions = ['C060', 'C063', 'C066', 'HEH0', 'EDF0']
 
     html_content = """
 <!DOCTYPE html>
@@ -296,7 +351,7 @@ def generate_distribution_html(pavilion_distributions):
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>パビリオン解放時間確率分布レポート</title>
+    <title>パビリオン解放時間確率分布レポート（15分重複除去版）</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         * {
@@ -373,10 +428,18 @@ def generate_distribution_html(pavilion_distributions):
             border-radius: 10px;
             text-align: center;
             box-shadow: 0 3px 10px rgba(0,0,0,0.1);
+            display: inline-block;
+            margin: 0 auto;
+            max-width: fit-content;
+        }
+
+        .stat-card-container {
+            text-align: center;
+            margin-bottom: 30px;
         }
 
         .stat-value {
-            font-size: 1.5em;
+            font-size: 1.2em;
             font-weight: 700;
             color: #667eea;
         }
@@ -468,8 +531,8 @@ def generate_distribution_html(pavilion_distributions):
 <body>
     <div class="container">
         <div class="header">
-            <h1>パビリオン解放時間確率分布</h1>
-            <p>15分単位での解放パターン分析レポート</p>
+            <h1>パビリオン解放時間確率分布（修正版）</h1>
+            <p>15分間隔重複除去による実用的解放予測分析</p>
         </div>
 
         <div class="content">
@@ -490,8 +553,10 @@ def generate_distribution_html(pavilion_distributions):
             <div class="pavilion-section">
                 <h2 class="pavilion-title">{pavilion_name} (総解放回数：{total_releases}回)</h2>
 
-                <div class="stat-card">
-                    <div class="stat-value">確率 ＝ その時間帯の解放回数 / 総解放回数</div>
+                <div class="stat-card-container">
+                    <div class="stat-card">
+                        <div class="stat-value">確率 ＝ その時間帯の解放回数 / 総解放回数</div>
+                    </div>
                 </div>
 
                 <div class="chart-container">
@@ -515,8 +580,8 @@ def generate_distribution_html(pavilion_distributions):
 """
 
     # Chart.js用のJavaScriptを生成
-    colors = ['rgba(255, 107, 107, 0.8)', 'rgba(78, 205, 196, 0.8)', 'rgba(69, 183, 209, 0.8)']
-    border_colors = ['rgb(255, 107, 107)', 'rgb(78, 205, 196)', 'rgb(69, 183, 209)']
+    colors = ['rgba(255, 107, 107, 0.8)', 'rgba(78, 205, 196, 0.8)', 'rgba(69, 183, 209, 0.8)', 'rgba(150, 206, 180, 0.8)', 'rgba(255, 234, 167, 0.8)']
+    border_colors = ['rgb(255, 107, 107)', 'rgb(78, 205, 196)', 'rgb(69, 183, 209)', 'rgb(150, 206, 180)', 'rgb(255, 234, 167)']
 
     for i, pavilion_code in enumerate(target_pavilions):
         if pavilion_code not in pavilion_distributions:
