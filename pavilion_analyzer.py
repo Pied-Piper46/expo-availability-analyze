@@ -6,14 +6,20 @@
 
 import json
 from datetime import datetime, timedelta
-from collections import defaultdict
+from collections import defaultdict, Counter
 import os
 import argparse
+import matplotlib.pyplot as plt
+import pandas as pd
+import numpy as np
 
 # パビリオン名のマッピング
 PAVILION_NAMES = {
     'HEH0': '住友館',
-    'EDF0': 'ヨルダン'
+    'EDF0': 'ヨルダン',
+    'C060': 'アイルランド生演奏',
+    'C063': 'アイルランドバンドライブ',
+    'C066': 'アイルランド生演奏なし'
 }
 
 def load_and_process_data(file_path, start_date=None, end_date=None):
@@ -92,6 +98,596 @@ def analyze_daily_release_patterns(data):
             filtered_patterns[pavilion][date] = filtered_times
     
     return filtered_patterns
+
+def calculate_release_time_distribution(data):
+    """解放時間の確率分布を計算（15分単位）"""
+    pavilion_distributions = {}
+
+    # 対象パビリオンのみ処理
+    target_pavilions = ['C060', 'C063', 'C066']
+
+    # 10:00 ~ 20:00の全ての15分間隔を生成
+    all_time_slots = []
+    all_time_labels = []
+    for hour in range(10, 20):
+        for minute in [0, 15, 30, 45]:
+            start_time = f"{hour:02d}:{minute:02d}"
+
+            # 終了時間を計算
+            end_minute = minute + 15
+            end_hour = hour
+            if end_minute >= 60:
+                end_minute = end_minute - 60
+                end_hour = hour + 1
+            end_time = f"{end_hour:02d}:{end_minute:02d}"
+
+            time_label = f"{start_time}~{end_time}"
+            all_time_slots.append(start_time)
+            all_time_labels.append(time_label)
+
+    for pavilion_code in target_pavilions:
+        if pavilion_code not in PAVILION_NAMES:
+            continue
+
+        pavilion_data = [item for item in data if item['pavilion_code'] == pavilion_code]
+
+        if not pavilion_data:
+            continue
+
+        # 15分単位で時間をグループ化
+        time_groups = defaultdict(int)
+        total_releases = 0
+
+        for item in pavilion_data:
+            jst_time = item['timestamp']
+            # 15分単位に丸める
+            minutes = jst_time.minute
+            rounded_minutes = (minutes // 15) * 15
+            time_group = jst_time.replace(minute=rounded_minutes, second=0, microsecond=0).strftime('%H:%M')
+
+            # 10:00 ~ 20:00の範囲内のみカウント
+            if time_group in all_time_slots:
+                time_groups[time_group] += 1
+                total_releases += 1
+
+        if total_releases == 0:
+            continue
+
+        # 全ての時間帯について確率分布を計算（データがない時間帯は0%）
+        distribution = {}
+        for i, time_slot in enumerate(all_time_slots):
+            count = time_groups[time_slot]
+            probability = count / total_releases if total_releases > 0 else 0
+            distribution[all_time_labels[i]] = {
+                'count': count,
+                'probability': probability,
+                'percentage': probability * 100
+            }
+
+        pavilion_distributions[pavilion_code] = {
+            'pavilion_name': PAVILION_NAMES[pavilion_code],
+            'total_releases': total_releases,
+            'distribution': distribution,
+            'time_labels': all_time_labels
+        }
+
+    return pavilion_distributions
+
+def create_distribution_visualization(pavilion_distributions):
+    """確率分布の可視化を作成（各パビリオンごとに個別のグラフ）"""
+    # バックエンドを設定（GUI不要）
+    import matplotlib
+    matplotlib.use('Agg')
+
+    # 日本語フォントの設定（元の設定を復元）
+    plt.rcParams['font.family'] = ['DejaVu Sans', 'Hiragino Sans', 'Yu Gothic', 'Meiryo', 'Takao', 'IPAexGothic', 'IPAPGothic', 'VL PGothic', 'Noto Sans CJK JP']
+
+    target_pavilions = ['C060', 'C063', 'C066']
+    colors = ['#FF6B6B', '#4ECDC4', '#45B7D1']
+
+    created_files = []
+
+    for i, pavilion_code in enumerate(target_pavilions):
+        if pavilion_code not in pavilion_distributions:
+            continue
+
+        data = pavilion_distributions[pavilion_code]
+        pavilion_name = data['pavilion_name']
+        total_releases = data['total_releases']
+        distribution = data['distribution']
+        time_labels = data['time_labels']
+
+        percentages = [distribution[time_label]['percentage'] for time_label in time_labels]
+
+        # 個別のグラフを作成
+        fig, ax = plt.subplots(1, 1, figsize=(16, 8))
+
+        bars = ax.bar(range(len(time_labels)), percentages, color=colors[i], alpha=0.8, edgecolor='black', linewidth=0.5)
+
+        # グラフの装飾
+        ax.set_title(f'{pavilion_name} - 解放時間確率分布 (総解放回数: {total_releases}回)',
+                    fontsize=16, fontweight='bold', pad=20)
+        ax.set_xlabel('解放時刻 (15分間隔)', fontsize=14)
+        ax.set_ylabel('確率 (%)', fontsize=14)
+        ax.grid(True, alpha=0.3, axis='y')
+
+        # X軸の設定
+        ax.set_xticks(range(len(time_labels)))
+        ax.set_xticklabels(time_labels, rotation=45, ha='right', fontsize=10)
+        ax.tick_params(axis='y', labelsize=12)
+
+        # 上位3つの時間帯にパーセンテージを表示
+        sorted_items = sorted(distribution.items(), key=lambda x: x[1]['percentage'], reverse=True)
+        top_3_times = [item[0] for item in sorted_items[:3] if item[1]['percentage'] > 0]
+
+        for j, (time_label, percentage) in enumerate(zip(time_labels, percentages)):
+            if time_label in top_3_times and percentage > 1.0:  # 1%以上のもののみ表示
+                ax.text(j, percentage + 0.2, f'{percentage:.1f}%',
+                       ha='center', va='bottom', fontweight='bold', fontsize=9)
+
+        # Y軸の範囲を調整
+        max_percentage = max(percentages) if percentages else 0
+        ax.set_ylim(0, max(max_percentage * 1.15, 5))  # 最低5%まで表示
+
+        # ファイル名を生成（日本語文字を安全な文字に置換）
+        safe_name = pavilion_name.replace("アイルランド", "Ireland").replace("生演奏", "Live").replace("バンドライブ", "Band").replace("なし", "NoLive")
+        filename = f'{pavilion_code}_{safe_name.replace(" ", "_")}_distribution.png'
+
+        plt.tight_layout()
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        created_files.append(filename)
+        plt.close()  # メモリ節約のためにクローズ
+
+    return created_files
+
+def generate_distribution_table(pavilion_distributions):
+    """確率分布表を生成"""
+    print("\n" + "="*80)
+    print("パビリオン解放時間確率分布表（15分単位）")
+    print("="*80)
+
+    target_pavilions = ['C060', 'C063', 'C066']
+
+    for pavilion_code in target_pavilions:
+        if pavilion_code not in pavilion_distributions:
+            continue
+
+        data = pavilion_distributions[pavilion_code]
+        pavilion_name = data['pavilion_name']
+        total_releases = data['total_releases']
+        distribution = data['distribution']
+
+        print(f"\n【{pavilion_name} ({pavilion_code})】")
+        print(f"総解放回数: {total_releases}回")
+        print("-" * 60)
+        print(f"{'解放時刻':<15} {'回数':<8} {'確率(%)':<10}")
+        print("-" * 60)
+
+        # 確率の高い順にソート（確率が0より大きいもののみ表示）
+        sorted_items = sorted(
+            [(time, stats) for time, stats in distribution.items() if stats['percentage'] > 0],
+            key=lambda x: x[1]['percentage'],
+            reverse=True
+        )
+
+        for time, stats in sorted_items:
+            count = stats['count']
+            percentage = stats['percentage']
+            print(f"{time:<15} {count:<8} {percentage:<10.2f}")
+
+        # 上位3位を表示
+        print(f"\n上位3位:")
+        for i, (time, stats) in enumerate(sorted_items[:3], 1):
+            print(f"  {i}位: {time} ({stats['percentage']:.2f}%)")
+
+        # 0%の時間帯の数を表示
+        zero_count = sum(1 for stats in distribution.values() if stats['percentage'] == 0)
+        print(f"\n解放がなかった時間帯: {zero_count}個")
+
+    print("\n" + "="*80)
+
+def generate_distribution_html(pavilion_distributions):
+    """確率分布のHTMLレポートを生成"""
+    target_pavilions = ['C060', 'C063', 'C066']
+
+    html_content = """
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>パビリオン解放時間確率分布レポート</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+            color: #333;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 40px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            font-weight: 700;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            font-size: 1.2em;
+            opacity: 0.9;
+        }
+
+        .content {
+            padding: 40px;
+        }
+
+        .pavilion-section {
+            margin-bottom: 60px;
+            background: #f8f9fa;
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+
+        .pavilion-title {
+            font-size: 1.8em;
+            font-weight: 700;
+            color: #667eea;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            box-shadow: 0 3px 10px rgba(0,0,0,0.1);
+        }
+
+        .stat-value {
+            font-size: 1.5em;
+            font-weight: 700;
+            color: #667eea;
+        }
+
+        .stat-label {
+            font-size: 0.9em;
+            color: #666;
+            margin-top: 5px;
+        }
+
+        .chart-container {
+            position: relative;
+            height: 400px;
+            margin: 30px 0;
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 3px 10px rgba(0,0,0,0.1);
+        }
+
+        .top-times {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 3px 10px rgba(0,0,0,0.1);
+        }
+
+        .top-times h3 {
+            color: #667eea;
+            margin-bottom: 15px;
+            font-size: 1.3em;
+        }
+
+        .top-time-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+            border-bottom: 1px solid #eee;
+        }
+
+        .top-time-item:last-child {
+            border-bottom: none;
+        }
+
+        .rank {
+            background: #667eea;
+            color: white;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+        }
+
+        .time-range {
+            font-weight: 600;
+            color: #333;
+        }
+
+        .percentage {
+            background: #e8f2ff;
+            color: #667eea;
+            padding: 5px 10px;
+            border-radius: 15px;
+            font-weight: 600;
+        }
+
+        .summary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+            margin-top: 40px;
+        }
+
+        .summary h2 {
+            margin-bottom: 15px;
+        }
+
+        .summary p {
+            opacity: 0.9;
+            line-height: 1.6;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>パビリオン解放時間確率分布</h1>
+            <p>15分単位での解放パターン分析レポート</p>
+        </div>
+
+        <div class="content">
+"""
+
+    for pavilion_code in target_pavilions:
+        if pavilion_code not in pavilion_distributions:
+            continue
+
+        data = pavilion_distributions[pavilion_code]
+        pavilion_name = data['pavilion_name']
+        total_releases = data['total_releases']
+        distribution = data['distribution']
+        time_labels = data['time_labels']
+
+
+        html_content += f"""
+            <div class="pavilion-section">
+                <h2 class="pavilion-title">{pavilion_name} (総解放回数：{total_releases}回)</h2>
+
+                <div class="stat-card">
+                    <div class="stat-value">確率 ＝ その時間帯の解放回数 / 総解放回数</div>
+                </div>
+
+                <div class="chart-container">
+                    <canvas id="chart_{pavilion_code}"></canvas>
+                </div>
+
+            </div>
+"""
+
+    html_content += """
+        </div>
+
+        <div class="summary">
+            <h2>📊 分析サマリー</h2>
+            <p>このレポートは過去の解放データを基に、各パビリオンの解放時間パターンを分析したものです。<br>
+            予約を取りたい時間帯の参考としてご活用ください。</p>
+        </div>
+    </div>
+
+    <script>
+"""
+
+    # Chart.js用のJavaScriptを生成
+    colors = ['rgba(255, 107, 107, 0.8)', 'rgba(78, 205, 196, 0.8)', 'rgba(69, 183, 209, 0.8)']
+    border_colors = ['rgb(255, 107, 107)', 'rgb(78, 205, 196)', 'rgb(69, 183, 209)']
+
+    for i, pavilion_code in enumerate(target_pavilions):
+        if pavilion_code not in pavilion_distributions:
+            continue
+
+        data = pavilion_distributions[pavilion_code]
+        time_labels = data['time_labels']
+        distribution = data['distribution']
+
+        chart_labels = [f"'{label}'" for label in time_labels]
+        chart_data = [distribution[time_label]['percentage'] for time_label in time_labels]
+
+        html_content += f"""
+        // Chart for {pavilion_code}
+        const ctx_{pavilion_code} = document.getElementById('chart_{pavilion_code}').getContext('2d');
+        const maxValue_{pavilion_code} = Math.max(...{chart_data});
+        const maxIndex_{pavilion_code} = {chart_data}.indexOf(maxValue_{pavilion_code});
+
+        const chart_{pavilion_code} = new Chart(ctx_{pavilion_code}, {{
+            type: 'bar',
+            data: {{
+                labels: [{', '.join(chart_labels)}],
+                datasets: [{{
+                    label: '解放確率(%)',
+                    data: {chart_data},
+                    backgroundColor: '{colors[i]}',
+                    borderColor: '{border_colors[i]}',
+                    borderWidth: 2,
+                    borderRadius: 5,
+                }}]
+            }},
+            options: {{
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {{
+                    legend: {{
+                        display: false
+                    }}
+                }},
+                scales: {{
+                    y: {{
+                        beginAtZero: true,
+                        max: Math.ceil(Math.max(...{chart_data}) / 20) * 20,
+                        ticks: {{
+                            stepSize: 20,
+                            callback: function(value) {{
+                                return value + '%';
+                            }}
+                        }},
+                        grid: {{
+                            display: true,
+                            color: 'rgba(0, 0, 0, 0.1)',
+                            lineWidth: 1
+                        }}
+                    }},
+                    x: {{
+                        ticks: {{
+                            maxRotation: 45,
+                            font: {{
+                                size: 10
+                            }}
+                        }},
+                        grid: {{
+                            display: false,
+                            tickLength: 5,
+                            tickColor: 'rgba(0, 0, 0, 0.3)'
+                        }},
+                        border: {{
+                            display: true
+                        }}
+                    }}
+                }}
+            }}
+        }});
+
+"""
+
+    html_content += """
+    </script>
+</body>
+</html>"""
+
+    return html_content
+
+def run_daily_analysis(data):
+    """日別レポート分析を実行"""
+    print("🔍 日別レポート分析を実行中...")
+    patterns = analyze_daily_release_patterns(data)
+
+    print(f"📈 分析対象:")
+    for pavilion_code, pavilion_name in PAVILION_NAMES.items():
+        if pavilion_code in patterns:
+            print(f"  - {pavilion_name} ({pavilion_code})")
+
+    print("\n🎨 HTMLレポートを生成中...")
+
+    # 各パビリオンのHTMLレポートを生成
+    for pavilion_code, pavilion_name in PAVILION_NAMES.items():
+        if pavilion_code in patterns:
+            html_content = generate_pavilion_html(
+                pavilion_code,
+                pavilion_name,
+                patterns[pavilion_code]
+            )
+
+            output_file = f"{pavilion_code}_{pavilion_name.replace('(', '').replace(')', '').replace('~', '-').replace(':', '')}_report.html"
+            # ファイル名を安全にする
+            output_file = output_file.replace('/', '-')
+
+            with open(output_file, 'w', encoding='utf-8') as f:
+                f.write(html_content)
+
+            print(f"  ✅ {pavilion_name}: {output_file}")
+
+    print(f"\n✅ 日別レポート分析完了! 各パビリオンのHTMLファイルを開いて結果を確認してください。")
+    print("🌟 生成されたレポートの特徴:")
+    print("  - 📅 日別解放時刻詳細（分単位で正確表示）")
+    print("  - 🕒 JST（日本標準時）での表示")
+    print("  - ⏰ 10分間隔フィルタ適用（同じ時刻帯の重複除去）")
+    print("  - 📋 シンプルなテーブル形式での表示")
+
+def run_distribution_analysis(data):
+    """確率分布分析を実行"""
+    print(f"🔍 解放時間確率分布を分析中...")
+
+    # status=0のデータのみをフィルタリング
+    status_0_data = [item for item in data if item['status'] == 0]
+
+    if not status_0_data:
+        print("status=0のデータが見つかりません。")
+        return
+
+    # 確率分布を計算
+    pavilion_distributions = calculate_release_time_distribution(status_0_data)
+
+    if not pavilion_distributions:
+        print("対象パビリオン（C060, C063, C066）のstatus=0データが見つかりません。")
+        return
+
+    # 確率分布表を生成・表示
+    generate_distribution_table(pavilion_distributions)
+
+    # 可視化グラフを作成
+    print(f"\n📊 グラフを生成中...")
+    try:
+        created_files = create_distribution_visualization(pavilion_distributions)
+        print("✅ 各パビリオンのグラフが以下のファイルとして保存されました:")
+        for filename in created_files:
+            print(f"  - {filename}")
+    except Exception as e:
+        print(f"⚠️ グラフ生成エラー: {e}")
+
+    # HTMLレポートを生成
+    print(f"\n🎨 HTMLレポートを生成中...")
+    try:
+        html_content = generate_distribution_html(pavilion_distributions)
+        html_filename = "pavilion_distribution_report.html"
+        with open(html_filename, 'w', encoding='utf-8') as f:
+            f.write(html_content)
+        print(f"✅ HTMLレポートが '{html_filename}' として保存されました。")
+        print("   ブラウザで開いてリッチな表示をご確認ください。")
+    except Exception as e:
+        print(f"⚠️ HTMLレポート生成エラー: {e}")
+
+    print(f"\n✅ 確率分布分析完了!")
+    print("🌟 分析結果の特徴:")
+    print("  - 📊 15分単位での解放時間確率分布")
+    print("  - 🕒 JST（日本標準時）での表示")
+    print("  - 📈 各パビリオンの総解放回数を表示")
+    print("  - 📋 確率の高い順にソート表示")
+    print("  - 🎨 インタラクティブなHTMLレポート")
 
 def generate_pavilion_html(pavilion_code, pavilion_name, patterns):
     """各パビリオンのHTMLレポートを生成（簡素化版）"""
@@ -294,7 +890,15 @@ def parse_arguments():
         default='availability_log.jsonl',
         help='入力ファイルパス（デフォルト: availability_log.jsonl）'
     )
-    
+
+    parser.add_argument(
+        '--mode', '-m',
+        type=str,
+        choices=['daily', 'distribution', 'both'],
+        default='both',
+        help='分析モード: daily=日別レポート, distribution=確率分布, both=両方（デフォルト: both）'
+    )
+
     return parser.parse_args()
 
 def main():
@@ -349,40 +953,26 @@ def main():
         print("対象パビリオンのデータが見つかりません。")
         return
     
-    print("🔍 データを分析中...")
-    patterns = analyze_daily_release_patterns(data)
-    
-    print(f"📈 分析対象:")
-    for pavilion_code, pavilion_name in PAVILION_NAMES.items():
-        if pavilion_code in patterns:
-            print(f"  - {pavilion_name} ({pavilion_code})")
-    
-    print("\n🎨 HTMLレポートを生成中...")
-    
-    # 各パビリオンのHTMLレポートを生成
-    for pavilion_code, pavilion_name in PAVILION_NAMES.items():
-        if pavilion_code in patterns:
-            html_content = generate_pavilion_html(
-                pavilion_code, 
-                pavilion_name, 
-                patterns[pavilion_code]
-            )
-            
-            output_file = f"{pavilion_code}_{pavilion_name.replace('(', '').replace(')', '').replace('~', '-').replace(':', '')}_report.html"
-            # ファイル名を安全にする
-            output_file = output_file.replace('/', '-')
-            
-            with open(output_file, 'w', encoding='utf-8') as f:
-                f.write(html_content)
-            
-            print(f"  ✅ {pavilion_name}: {output_file}")
-    
-    print(f"\n✅ 分析完了! 各パビリオンのHTMLファイルを開いて結果を確認してください。")
-    print("🌟 生成されたレポートの特徴:")
-    print("  - 📅 日別解放時刻詳細（分単位で正確表示）")
-    print("  - 🕒 JST（日本標準時）での表示")
-    print("  - ⏰ 10分間隔フィルタ適用（同じ時刻帯の重複除去）")
-    print("  - 📋 シンプルなテーブル形式での表示")
+    # 分析モードに応じて実行
+    mode = args.mode
+
+    if mode in ['daily', 'both']:
+        print("\n" + "="*60)
+        print("【日別レポート分析】")
+        print("="*60)
+        run_daily_analysis(data)
+
+    if mode in ['distribution', 'both']:
+        print("\n" + "="*60)
+        print("【確率分布分析】")
+        print("="*60)
+        run_distribution_analysis(data)
+
+    print(f"\n🎉 全ての分析が完了しました！")
+    if mode == 'both':
+        print("📊 実行された分析:")
+        print("  - 日別解放時刻レポート（HTMLファイル）")
+        print("  - 解放時間確率分布（グラフとテーブル）")
 
 if __name__ == "__main__":
     main()
