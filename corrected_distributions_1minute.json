@@ -1,0 +1,180 @@
+{
+  "C060": {
+    "pavilion_name": "アイルランド生演奏",
+    "total_releases": 25,
+    "distribution": {
+      "11:57": {
+        "count": 1,
+        "probability": 0.04,
+        "percentage": 4.0
+      },
+      "11:49": {
+        "count": 1,
+        "probability": 0.04,
+        "percentage": 4.0
+      },
+      "11:46": {
+        "count": 6,
+        "probability": 0.24,
+        "percentage": 24.0
+      },
+      "11:58": {
+        "count": 1,
+        "probability": 0.04,
+        "percentage": 4.0
+      },
+      "11:47": {
+        "count": 3,
+        "probability": 0.12,
+        "percentage": 12.0
+      },
+      "11:50": {
+        "count": 2,
+        "probability": 0.08,
+        "percentage": 8.0
+      },
+      "11:51": {
+        "count": 4,
+        "probability": 0.16,
+        "percentage": 16.0
+      },
+      "12:34": {
+        "count": 1,
+        "probability": 0.04,
+        "percentage": 4.0
+      },
+      "10:00": {
+        "count": 2,
+        "probability": 0.08,
+        "percentage": 8.0
+      },
+      "11:48": {
+        "count": 1,
+        "probability": 0.04,
+        "percentage": 4.0
+      },
+      "11:56": {
+        "count": 1,
+        "probability": 0.04,
+        "percentage": 4.0
+      },
+      "11:53": {
+        "count": 1,
+        "probability": 0.04,
+        "percentage": 4.0
+      },
+      "11:55": {
+        "count": 1,
+        "probability": 0.04,
+        "percentage": 4.0
+      }
+    }
+  },
+  "C063": {
+    "pavilion_name": "アイルランドバンドライブ",
+    "total_releases": 22,
+    "distribution": {
+      "15:53": {
+        "count": 1,
+        "probability": 0.045454545454545456,
+        "percentage": 4.545454545454546
+      },
+      "15:52": {
+        "count": 5,
+        "probability": 0.22727272727272727,
+        "percentage": 22.727272727272727
+      },
+      "15:58": {
+        "count": 3,
+        "probability": 0.13636363636363635,
+        "percentage": 13.636363636363635
+      },
+      "15:47": {
+        "count": 4,
+        "probability": 0.18181818181818182,
+        "percentage": 18.181818181818183
+      },
+      "15:50": {
+        "count": 2,
+        "probability": 0.09090909090909091,
+        "percentage": 9.090909090909092
+      },
+      "15:51": {
+        "count": 1,
+        "probability": 0.045454545454545456,
+        "percentage": 4.545454545454546
+      },
+      "15:54": {
+        "count": 1,
+        "probability": 0.045454545454545456,
+        "percentage": 4.545454545454546
+      },
+      "15:55": {
+        "count": 1,
+        "probability": 0.045454545454545456,
+        "percentage": 4.545454545454546
+      },
+      "15:46": {
+        "count": 2,
+        "probability": 0.09090909090909091,
+        "percentage": 9.090909090909092
+      },
+      "15:49": {
+        "count": 1,
+        "probability": 0.045454545454545456,
+        "percentage": 4.545454545454546
+      },
+      "15:56": {
+        "count": 1,
+        "probability": 0.045454545454545456,
+        "percentage": 4.545454545454546
+      }
+    }
+  },
+  "C066": {
+    "pavilion_name": "アイルランド生演奏なし",
+    "total_releases": 19,
+    "distribution": {
+      "18:50": {
+        "count": 6,
+        "probability": 0.3157894736842105,
+        "percentage": 31.57894736842105
+      },
+      "18:47": {
+        "count": 3,
+        "probability": 0.15789473684210525,
+        "percentage": 15.789473684210526
+      },
+      "18:52": {
+        "count": 1,
+        "probability": 0.05263157894736842,
+        "percentage": 5.263157894736842
+      },
+      "18:46": {
+        "count": 3,
+        "probability": 0.15789473684210525,
+        "percentage": 15.789473684210526
+      },
+      "18:51": {
+        "count": 3,
+        "probability": 0.15789473684210525,
+        "percentage": 15.789473684210526
+      },
+      "18:59": {
+        "count": 1,
+        "probability": 0.05263157894736842,
+        "percentage": 5.263157894736842
+      },
+      "18:53": {
+        "count": 1,
+        "probability": 0.05263157894736842,
+        "percentage": 5.263157894736842
+      },
+      "18:57": {
+        "count": 1,
+        "probability": 0.05263157894736842,
+        "percentage": 5.263157894736842
+      }
+    }
+  }
+}

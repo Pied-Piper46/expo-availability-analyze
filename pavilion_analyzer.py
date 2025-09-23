@@ -341,6 +341,697 @@ def generate_distribution_table(pavilion_distributions):
 
     print("\n" + "="*80)
 
+def calculate_detailed_ireland_distribution(data):
+    """アイルランドパビリオンの1分間隔詳細分析（15分間隔重複除去維持・1分間隔集計）"""
+    ireland_pavilions = ['C060', 'C063', 'C066']
+
+    # 15分間隔重複除去を実行（既存ロジック維持）
+    filtered_releases = preprocess_releases_for_distribution(data, interval_minutes=15)
+
+    detailed_distributions = {}
+
+    # 10:00 ~ 20:00の全ての1分間隔を生成
+    all_minute_slots = []
+    all_minute_labels = []
+    for hour in range(10, 20):
+        for minute in range(60):
+            time_label = f"{hour:02d}:{minute:02d}"
+            all_minute_slots.append(time_label)
+            all_minute_labels.append(time_label)
+
+    for pavilion_code in ireland_pavilions:
+        if pavilion_code not in PAVILION_NAMES:
+            continue
+
+        pavilion_data = filtered_releases.get(pavilion_code, [])
+
+        if not pavilion_data:
+            continue
+
+        # 1分単位で時間をグループ化（15分間隔フィルタリング済みデータを1分単位で集計）
+        time_groups = defaultdict(int)
+        total_releases = len(pavilion_data)
+
+        for item in pavilion_data:
+            jst_time = item['timestamp']
+            # 1分単位に丸める（秒は切り捨て）
+            time_group = jst_time.replace(second=0, microsecond=0).strftime('%H:%M')
+
+            # 10:00 ~ 20:00の範囲内のみカウント
+            if time_group in all_minute_slots:
+                time_groups[time_group] += 1
+
+        if total_releases == 0:
+            continue
+
+        # 全ての時間帯について確率分布を計算（データがない時間帯は0%）
+        distribution = {}
+        for minute_slot in all_minute_slots:
+            count = time_groups[minute_slot]
+            probability = count / total_releases if total_releases > 0 else 0
+            distribution[minute_slot] = {
+                'count': count,
+                'probability': probability,
+                'percentage': probability * 100
+            }
+
+        detailed_distributions[pavilion_code] = {
+            'pavilion_name': PAVILION_NAMES[pavilion_code],
+            'total_releases': total_releases,
+            'distribution': distribution,
+            'minute_labels': all_minute_labels
+        }
+
+    return detailed_distributions
+
+def save_minute_interval_distributions_json(data):
+    """1分間隔集計でのcorrected_distributions.jsonファイルを作成"""
+    import json
+
+    # 15分間隔重複除去を実行（既存ロジック維持）
+    filtered_releases = preprocess_releases_for_distribution(data, interval_minutes=15)
+
+    # アイルランドパビリオンのみ対象
+    ireland_pavilions = ['C060', 'C063', 'C066']
+
+    minute_distributions = {}
+
+    for pavilion_code in ireland_pavilions:
+        if pavilion_code not in PAVILION_NAMES:
+            continue
+
+        pavilion_data = filtered_releases.get(pavilion_code, [])
+
+        if not pavilion_data:
+            continue
+
+        # 1分単位で時間をグループ化
+        time_groups = defaultdict(int)
+        total_releases = len(pavilion_data)
+
+        for item in pavilion_data:
+            jst_time = item['timestamp']
+            # 1分単位に丸める（秒は切り捨て）
+            time_group = jst_time.replace(second=0, microsecond=0).strftime('%H:%M')
+
+            # 10:00 ~ 20:00の範囲内のみカウント
+            hour = jst_time.hour
+            if 10 <= hour < 20:
+                time_groups[time_group] += 1
+
+        # 確率分布を計算（0%のデータは除外）
+        distribution = {}
+        for time_slot, count in time_groups.items():
+            if count > 0:  # 実際に解放があった時間帯のみ
+                probability = count / total_releases
+                distribution[time_slot] = {
+                    'count': count,
+                    'probability': probability,
+                    'percentage': probability * 100
+                }
+
+        if distribution:  # データがある場合のみ追加
+            minute_distributions[pavilion_code] = {
+                'pavilion_name': PAVILION_NAMES[pavilion_code],
+                'total_releases': total_releases,
+                'distribution': distribution
+            }
+
+    # JSONファイルとして保存
+    output_filename = "corrected_distributions_1minute.json"
+    with open(output_filename, 'w', encoding='utf-8') as f:
+        json.dump(minute_distributions, f, ensure_ascii=False, indent=2)
+
+    print(f"✅ 1分間隔集計のJSONファイルが '{output_filename}' として保存されました。")
+
+    return minute_distributions
+
+def create_simple_html_from_json():
+    """corrected_distributions_1minute.jsonから簡単なHTMLグラフを作成"""
+    import json
+    import os
+
+    json_filename = "corrected_distributions_1minute.json"
+
+    if not os.path.exists(json_filename):
+        print(f"❌ {json_filename} が見つかりません。")
+        return
+
+    # JSONファイルを読み込み
+    with open(json_filename, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+
+    html_content = """
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>アイルランドパビリオン 1分間隔解放時間分析</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #2E8B57 0%, #228B22 100%);
+            min-height: 100vh;
+            padding: 20px;
+            color: #333;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #2E8B57 0%, #228B22 100%);
+            color: white;
+            padding: 40px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            font-weight: 700;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            font-size: 1.2em;
+            opacity: 0.9;
+        }
+
+        .content {
+            padding: 40px;
+        }
+
+        .pavilion-section {
+            margin-bottom: 60px;
+            background: #f8f9fa;
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+
+        .pavilion-title {
+            font-size: 1.8em;
+            font-weight: 700;
+            color: #2E8B57;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .chart-container {
+            position: relative;
+            height: 400px;
+            margin: 30px 0;
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 3px 10px rgba(0,0,0,0.1);
+        }
+
+        .stats {
+            text-align: center;
+            margin-bottom: 20px;
+            background: white;
+            padding: 15px;
+            border-radius: 10px;
+            box-shadow: 0 3px 10px rgba(0,0,0,0.1);
+        }
+
+        .summary {
+            background: linear-gradient(135deg, #2E8B57 0%, #228B22 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+            margin-top: 40px;
+        }
+
+        .summary h2 {
+            margin-bottom: 15px;
+        }
+
+        .summary p {
+            opacity: 0.9;
+            line-height: 1.6;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🍀 アイルランドパビリオン 1分間隔分析</h1>
+            <p>15分間隔重複除去 + 1分間隔集計による詳細解放時間分析</p>
+        </div>
+
+        <div class="content">
+"""
+
+    colors = ['rgba(255, 107, 107, 0.8)', 'rgba(78, 205, 196, 0.8)', 'rgba(69, 183, 209, 0.8)']
+    border_colors = ['rgb(255, 107, 107)', 'rgb(78, 205, 196)', 'rgb(69, 183, 209)']
+
+    chart_index = 0
+    for pavilion_code, pavilion_data in data.items():
+        pavilion_name = pavilion_data['pavilion_name']
+        total_releases = pavilion_data['total_releases']
+        distribution = pavilion_data['distribution']
+
+        # 時間順にソートしてラベルとデータを作成
+        sorted_times = sorted(distribution.keys())
+        time_labels = [f"'{time}'" for time in sorted_times]
+        percentages = [distribution[time]['percentage'] for time in sorted_times]
+
+        html_content += f"""
+            <div class="pavilion-section">
+                <h2 class="pavilion-title">{pavilion_name}</h2>
+
+                <div class="stats">
+                    <strong>総解放回数: {total_releases}回</strong>
+                </div>
+
+                <div class="chart-container">
+                    <canvas id="chart_{pavilion_code}"></canvas>
+                </div>
+            </div>
+"""
+
+        chart_index += 1
+
+    html_content += """
+        </div>
+
+        <div class="summary">
+            <h2>📊 分析サマリー</h2>
+            <p>15分間隔での重複除去を行った後、1分間隔で集計した詳細な解放時間分析です。<br>
+            各パビリオンの解放時間パターンが1分単位で確認できます。</p>
+        </div>
+    </div>
+
+    <script>
+"""
+
+    # Chart.js用のJavaScriptを生成
+    chart_index = 0
+    for pavilion_code, pavilion_data in data.items():
+        distribution = pavilion_data['distribution']
+
+        # 時間順にソートしてデータを作成
+        sorted_times = sorted(distribution.keys())
+        time_labels = [f"'{time}'" for time in sorted_times]
+        percentages = [distribution[time]['percentage'] for time in sorted_times]
+
+        html_content += f"""
+        // Chart for {pavilion_code}
+        const ctx_{pavilion_code} = document.getElementById('chart_{pavilion_code}').getContext('2d');
+
+        const chart_{pavilion_code} = new Chart(ctx_{pavilion_code}, {{
+            type: 'bar',
+            data: {{
+                labels: [{', '.join(time_labels)}],
+                datasets: [{{
+                    label: '解放確率(%)',
+                    data: {percentages},
+                    backgroundColor: '{colors[chart_index]}',
+                    borderColor: '{border_colors[chart_index]}',
+                    borderWidth: 2,
+                    borderRadius: 3,
+                }}]
+            }},
+            options: {{
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {{
+                    legend: {{
+                        display: false
+                    }},
+                    title: {{
+                        display: true,
+                        text: '1分間隔での解放確率分布',
+                        font: {{
+                            size: 16,
+                            weight: 'bold'
+                        }}
+                    }}
+                }},
+                scales: {{
+                    y: {{
+                        beginAtZero: true,
+                        ticks: {{
+                            callback: function(value) {{
+                                return value + '%';
+                            }}
+                        }},
+                        grid: {{
+                            display: true,
+                            color: 'rgba(0, 0, 0, 0.1)',
+                            lineWidth: 1
+                        }}
+                    }},
+                    x: {{
+                        ticks: {{
+                            maxRotation: 45,
+                            font: {{
+                                size: 10
+                            }}
+                        }},
+                        grid: {{
+                            display: false
+                        }}
+                    }}
+                }}
+            }}
+        }});
+
+"""
+        chart_index += 1
+
+    html_content += """
+    </script>
+</body>
+</html>"""
+
+    # HTMLファイルとして保存
+    output_filename = "ireland_pavilion_1minute_analysis.html"
+    with open(output_filename, 'w', encoding='utf-8') as f:
+        f.write(html_content)
+
+    print(f"✅ HTMLグラフが '{output_filename}' として保存されました。")
+    return output_filename
+
+def generate_detailed_ireland_html(detailed_distributions):
+    """アイルランドパビリオン詳細分析のHTMLレポートを生成"""
+
+    html_content = """
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>アイルランドパビリオン詳細解放時間分析（1分間隔）</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #2E8B57 0%, #228B22 100%);
+            min-height: 100vh;
+            padding: 20px;
+            color: #333;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #2E8B57 0%, #228B22 100%);
+            color: white;
+            padding: 40px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            font-weight: 700;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            font-size: 1.2em;
+            opacity: 0.9;
+        }
+
+        .content {
+            padding: 40px;
+        }
+
+        .pavilion-section {
+            margin-bottom: 60px;
+            background: #f8f9fa;
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+
+        .pavilion-title {
+            font-size: 1.8em;
+            font-weight: 700;
+            color: #2E8B57;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            box-shadow: 0 3px 10px rgba(0,0,0,0.1);
+        }
+
+        .stat-value {
+            font-size: 1.5em;
+            font-weight: 700;
+            color: #2E8B57;
+        }
+
+        .stat-label {
+            font-size: 0.9em;
+            color: #666;
+            margin-top: 5px;
+        }
+
+        .chart-container {
+            position: relative;
+            height: 400px;
+            margin: 30px 0;
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 3px 10px rgba(0,0,0,0.1);
+        }
+
+        .window-info {
+            background: #e8f5e8;
+            border-left: 4px solid #2E8B57;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 5px;
+        }
+
+        .window-info h3 {
+            color: #2E8B57;
+            margin-bottom: 10px;
+        }
+
+        .summary {
+            background: linear-gradient(135deg, #2E8B57 0%, #228B22 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+            margin-top: 40px;
+        }
+
+        .summary h2 {
+            margin-bottom: 15px;
+        }
+
+        .summary p {
+            opacity: 0.9;
+            line-height: 1.6;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🍀 アイルランドパビリオン詳細分析</h1>
+            <p>1分間隔・15分間時間窓での高精度解放時間分析</p>
+        </div>
+
+        <div class="content">
+"""
+
+    ireland_pavilions = ['C060', 'C063', 'C066']
+    colors = ['rgba(255, 107, 107, 0.8)', 'rgba(78, 205, 196, 0.8)', 'rgba(69, 183, 209, 0.8)']
+    border_colors = ['rgb(255, 107, 107)', 'rgb(78, 205, 196)', 'rgb(69, 183, 209)']
+
+    for i, pavilion_code in enumerate(ireland_pavilions):
+        if pavilion_code not in detailed_distributions:
+            continue
+
+        data = detailed_distributions[pavilion_code]
+        pavilion_name = data['pavilion_name']
+        total_releases = data['total_releases']
+        window_releases = data['window_releases']
+        window_start = data['window_start']
+        window_end = data['window_end']
+        distribution = data['distribution']
+        minute_slots = data['minute_slots']
+        most_common_time = data['most_common_time']
+
+        html_content += f"""
+            <div class="pavilion-section">
+                <h2 class="pavilion-title">{pavilion_name}</h2>
+
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-value">{total_releases}回</div>
+                        <div class="stat-label">総解放回数</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">{window_releases}回</div>
+                        <div class="stat-label">分析対象時間窓内</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">{most_common_time}</div>
+                        <div class="stat-label">最頻出時刻</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">{window_start}～{window_end}</div>
+                        <div class="stat-label">分析時間窓</div>
+                    </div>
+                </div>
+
+                <div class="window-info">
+                    <h3>📊 分析内容</h3>
+                    <p>最も解放頻度の高い時刻（{most_common_time}）を中心とした15分間の時間窓で、1分間隔での詳細分析を実施。
+                    重複除去は1分間隔で適用し、より細かな解放パターンを把握します。</p>
+                </div>
+
+                <div class="chart-container">
+                    <canvas id="chart_{pavilion_code}"></canvas>
+                </div>
+
+            </div>
+"""
+
+    html_content += """
+        </div>
+
+        <div class="summary">
+            <h2>📊 詳細分析サマリー</h2>
+            <p>アイルランドパビリオンの解放時間は比較的固定的なパターンを示すため、1分間隔での詳細分析により、<br>
+            より正確な予約タイミングの把握が可能になります。15分間の時間窓内での分布をご確認ください。</p>
+        </div>
+    </div>
+
+    <script>
+"""
+
+    # Chart.js用のJavaScriptを生成
+    for i, pavilion_code in enumerate(ireland_pavilions):
+        if pavilion_code not in detailed_distributions:
+            continue
+
+        data = detailed_distributions[pavilion_code]
+        minute_slots = data['minute_slots']
+        distribution = data['distribution']
+
+        chart_labels = [f"'{slot}'" for slot in minute_slots]
+        chart_data = [distribution[slot]['percentage'] for slot in minute_slots]
+
+        html_content += f"""
+        // Chart for {pavilion_code}
+        const ctx_{pavilion_code} = document.getElementById('chart_{pavilion_code}').getContext('2d');
+
+        const chart_{pavilion_code} = new Chart(ctx_{pavilion_code}, {{
+            type: 'bar',
+            data: {{
+                labels: [{', '.join(chart_labels)}],
+                datasets: [{{
+                    label: '解放確率(%)',
+                    data: {chart_data},
+                    backgroundColor: '{colors[i]}',
+                    borderColor: '{border_colors[i]}',
+                    borderWidth: 2,
+                    borderRadius: 3,
+                }}]
+            }},
+            options: {{
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {{
+                    legend: {{
+                        display: false
+                    }},
+                    title: {{
+                        display: true,
+                        text: '1分間隔での解放確率分布（15分間時間窓）',
+                        font: {{
+                            size: 16,
+                            weight: 'bold'
+                        }}
+                    }}
+                }},
+                scales: {{
+                    y: {{
+                        beginAtZero: true,
+                        max: Math.ceil(Math.max(...{chart_data}) / 10) * 10,
+                        ticks: {{
+                            stepSize: 10,
+                            callback: function(value) {{
+                                return value + '%';
+                            }}
+                        }},
+                        grid: {{
+                            display: true,
+                            color: 'rgba(0, 0, 0, 0.1)',
+                            lineWidth: 1
+                        }}
+                    }},
+                    x: {{
+                        ticks: {{
+                            maxRotation: 45,
+                            font: {{
+                                size: 10
+                            }}
+                        }},
+                        grid: {{
+                            display: false
+                        }}
+                    }}
+                }}
+            }}
+        }});
+
+"""
+
+    html_content += """
+    </script>
+</body>
+</html>"""
+
+    return html_content
+
 def generate_distribution_html(pavilion_distributions):
     """確率分布のHTMLレポートを生成"""
     target_pavilions = ['C060', 'C063', 'C066', 'HEH0', 'EDF0']
@@ -703,6 +1394,37 @@ def run_daily_analysis(data):
     print("  - ⏰ 10分間隔フィルタ適用（同じ時刻帯の重複除去）")
     print("  - 📋 シンプルなテーブル形式での表示")
 
+def run_ireland_detailed_analysis(data):
+    """アイルランドパビリオン詳細分析を実行"""
+    print(f"🍀 アイルランドパビリオン詳細分析を実行中...")
+
+    # status=0のデータのみをフィルタリング
+    status_0_data = [item for item in data if item['status'] == 0]
+
+    if not status_0_data:
+        print("status=0のデータが見つかりません。")
+        return
+
+    # 1分間隔集計のJSONファイルを作成
+    print(f"\n📊 1分間隔集計のJSONファイルを作成中...")
+    minute_distributions = save_minute_interval_distributions_json(status_0_data)
+
+    if not minute_distributions:
+        print("アイルランドパビリオン（C060, C063, C066）のstatus=0データが見つかりません。")
+        return
+
+    # JSONからHTMLグラフを作成
+    print(f"\n🎨 HTMLグラフを生成中...")
+    html_filename = create_simple_html_from_json()
+
+    print(f"\n✅ アイルランドパビリオン詳細分析完了!")
+    print("🌟 作成されたファイル:")
+    print("  - 📄 corrected_distributions_1minute.json (1分間隔集計データ)")
+    print(f"  - 🎨 {html_filename} (HTMLグラフ)")
+    print("  - 🕐 15分間隔重複除去 + 1分間隔集計")
+    print("  - 🕒 JST（日本標準時）での時刻表示")
+    print("  - 📊 解放があった時間帯のみ記録")
+
 def run_distribution_analysis(data):
     """確率分布分析を実行"""
     print(f"🔍 解放時間確率分布を分析中...")
@@ -959,9 +1681,9 @@ def parse_arguments():
     parser.add_argument(
         '--mode', '-m',
         type=str,
-        choices=['daily', 'distribution', 'both'],
+        choices=['daily', 'distribution', 'both', 'ireland-detailed'],
         default='both',
-        help='分析モード: daily=日別レポート, distribution=確率分布, both=両方（デフォルト: both）'
+        help='分析モード: daily=日別レポート, distribution=確率分布, both=両方, ireland-detailed=アイルランド詳細分析（デフォルト: both）'
     )
 
     return parser.parse_args()
@@ -1033,11 +1755,20 @@ def main():
         print("="*60)
         run_distribution_analysis(data)
 
+    if mode == 'ireland-detailed':
+        print("\n" + "="*60)
+        print("【アイルランドパビリオン詳細分析】")
+        print("="*60)
+        run_ireland_detailed_analysis(data)
+
     print(f"\n🎉 全ての分析が完了しました！")
     if mode == 'both':
         print("📊 実行された分析:")
         print("  - 日別解放時刻レポート（HTMLファイル）")
         print("  - 解放時間確率分布（グラフとテーブル）")
+    elif mode == 'ireland-detailed':
+        print("📊 実行された分析:")
+        print("  - アイルランドパビリオン1分間隔詳細分析（HTMLファイル）")
 
 if __name__ == "__main__":
     main()
